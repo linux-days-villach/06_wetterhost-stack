@@ -1,0 +1,112 @@
+version: '3.1'
+
+services:
+  db:
+    image: thedifferent/mariadb:latest
+    #build: mariadb
+    networks:
+      - "local"
+      - "dbgui"
+    volumes:
+      - "db-data:/var/lib/mysql"
+    environment:
+      - "MYSQL_ROOT_HOST=%"
+      - "MYSQL_ROOT_PASSWORD_LOCAL=true"
+      - "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}"
+      - "MYSQL_DATABASE=${MYSQL_DATABASE}"
+      - "MYSQL_USER=${MYSQL_USER}"
+      - "MYSQL_PASSWORD=${MYSQL_PASSWORD}"
+    deploy:
+      resources:
+        #limits:
+        #  cpus: '0.20'
+        #  memory: 512M
+        reservations:
+          cpus: '0.10'
+          memory: 256M
+  redis:
+      image: redis:5.0.1-alpine
+      networks:
+        - "local"
+
+  elasticsearch:
+      image: elasticsearch:2.3
+      networks:
+        - "local"
+
+  app:
+      image: kleberbaum/linuxdays-wetterhost:latest
+      deploy:
+        replicas: 1
+        labels:
+          #- "traefik.backend.loadbalancer.sticky=true"
+          #- "traefik.backend.loadbalancer.swarm=true"
+          - "traefik.enable=true"
+          - "traefik.port=8000"
+          - "traefik.docker.network=traefik-net"
+          - "traefik.site.frontend.rule=Host:${SITE};Path:/www/;PathStrip: /www/"
+          - "traefik.api.frontend.rule=Host:${API};AddPrefix:/api/graphiql/"
+          - "traefik.backend=${DOCKERCLOUD_CONTAINER_HOSTNAME}"
+      networks:
+        - "local"
+        - "rvproxy"
+      ports:
+        - "51000:8000"
+      volumes:
+        - "es-media:/code/media"
+      environment:
+        #- "DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}"
+        #- "DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db/${POSTGRES_DB}"
+        - "DATABASE_URL=mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}"
+        - "CACHE_URL=redis://redis"
+        - "ELASTICSEARCH_ENDPOINT=elasticsearch"
+      depends_on:
+        - "db"
+        - "redis"
+        - "elasticsearch"
+
+  scloudflare:
+      image: joshava/cloudflare-ddns:latest
+      deploy:
+        replicas: 1
+      networks:
+        - "local"
+      environment:
+        - "ZONE=${ZONE}"
+        - "HOST=${API}"
+        - "EMAIL=${CLOUDFLARE_EMAIL}"
+        - "API=${CLOUDFLARE_API}"
+        - "FORCE_CREATE=true"
+      depends_on:
+        - "app"
+
+  acloudflare:
+      image: joshava/cloudflare-ddns:latest
+      deploy:
+        replicas: 1
+      networks:
+        - "local"
+      environment:
+        - "ZONE=${ZONE}"
+        - "HOST=${SITE}"
+        - "EMAIL=${CLOUDFLARE_EMAIL}"
+        - "API=${CLOUDFLARE_API}"
+        - "FORCE_CREATE=true"
+      depends_on:
+        - "app"
+
+networks:
+  local:
+    driver: overlay
+  dbgui:
+    external:
+      name: adminer-net
+  rvproxy:
+    external:
+      name: traefik-net
+
+volumes:
+  db-data:
+    driver: local
+  es-media:
+    driver: local
